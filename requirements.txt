@@ -6,4 +6,5 @@ yt-dlp
 google-genai
 faster-whisper
 feedparser
-
+google-api-python-client
+google-auth-oauthlib
