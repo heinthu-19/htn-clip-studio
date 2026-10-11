@@ -11,7 +11,7 @@ import feedparser
 import yt_dlp
 from faster_whisper import WhisperModel
 from google import genai
-import google_auth_oauthlib.flow
+import google.oauth2.credentials
 import googleapiclient.discovery
 from googleapiclient.http import MediaFileUpload
 
@@ -34,24 +34,37 @@ db = {
     "tasks": {}
 }
 
-# --- YouTube OAuth Uploader ---
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
-
+# --- YouTube Auto Post Uploader (using client_secret.json containing credentials) ---
 def upload_scheduled_short(video_path: str, title: str, schedule_time_iso: str):
     secret_path = os.path.join(BASE_DIR, "client_secret.json")
     if not os.path.exists(secret_path):
-        print("client_secret.json not found. Skipping auto-upload.")
+        print("[YouTube Auto-Post] client_secret.json missing. Skipping auto-upload.")
         return None
 
     try:
-        flow = google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file(secret_path, SCOPES)
-        credentials = flow.run_local_server(port=0)
-        youtube = googleapiclient.discovery.build("youtube", "v3", credentials=credentials)
+        with open(secret_path, 'r') as f:
+            secret_data = json.load(f)
+
+        # check if it contains refresh token
+        if "refresh_token" not in secret_data:
+            print("[YouTube Auto-Post] Missing refresh_token in client_secret.json. Skipping auto-upload.")
+            return None
+
+        # setup background OAuth credential without triggering user authorization interface
+        creds = google.oauth2.credentials.Credentials(
+            token=None,
+            refresh_token=secret_data["refresh_token"],
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=secret_data["client_id"],
+            client_secret=secret_data["client_secret"]
+        )
+
+        youtube = googleapiclient.discovery.build("youtube", "v3", credentials=creds)
 
         body = {
             "snippet": {
                 "title": f"{title} #Shorts #HTN"[:100],
-                "description": f"{title} - Follow HTN for more clips! #Shorts #HTN",
+                "description": f"{title} - Auto-posted via HTN Clip Studio! #Shorts #HTN",
                 "tags": ["Shorts", "Viral", "HTN"],
                 "categoryId": "22"
             },
@@ -61,12 +74,24 @@ def upload_scheduled_short(video_path: str, title: str, schedule_time_iso: str):
                 "selfDeclaredMadeForKids": False
             }
         }
+        
+        print(f"[YouTube Auto-Post] Launching background upload for clip: {title} scheduled at {schedule_time_iso}")
         media = MediaFileUpload(video_path, chunksize=-1, resumable=True, mimetype="video/mp4")
         req = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
-        res = req.execute()
-        return f"https://youtube.com/shorts/{res['id']}"
+        
+        # Resume uploads chunk-by-chunk securely
+        response = None
+        while response is None:
+            status, response = req.next_chunk()
+            if status:
+                print(f"[YouTube Auto-Post] Upload Progress: {int(status.progress() * 100)}%")
+        
+        video_id = response['id']
+        print(f"[YouTube Auto-Post] Success! Uploaded Video ID: {video_id}")
+        return f"https://youtube.com/shorts/{video_id}"
+        
     except Exception as e:
-        print(f"Upload error: {e}")
+        print(f"[YouTube Auto-Post Error] Could not upload auto post: {e}")
         return None
 
 # --- Core Video Processing ---
@@ -80,11 +105,12 @@ def fetch_latest_youtube_video(channel_id: str):
 
 def download_video(url: str, output_path: str):
     ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'format': 'best[ext=mp4]/best',
         'outtmpl': output_path,
         'overwrites': True,
         'quiet': False,
         'no_warnings': False,
+        # iOS-Native and Creator fallback extractor variables to bypass YouTube data center blocks
         'extractor_args': {
             'youtube': {
                 'player_client': ['android_creator', 'ios'],
@@ -183,11 +209,14 @@ def process_pipeline(task_id: str, channel_id: str, direct_url: str):
             clip_path = os.path.join(OUTPUT_DIR, clip_name)
             duration = item["end_time"] - item["start_time"]
             
-            db["tasks"][task_id]["message"] = f"Part {idx+1} ကို 9:16 Anti-Copyright Shorts အဖြစ် ဖြတ်ညှပ်နေပါသည်..."
+            db["tasks"][task_id]["message"] = f"Part {idx+1} ({item.get('title', 'Part ' + str(idx+1))}) ကို 9:16 Anti-Copyright Shorts အဖြစ် ဖြတ်ညှပ်နေပါသည်..."
             render_anti_copyright_short(raw_path, item["start_time"], duration, clip_path)
             generated_clips.append(f"/outputs/{clip_name}")
 
+            # ၄ နာရီခြားပြီး schedule upload တင်ခြင်း
             sched_time = (base_time + timedelta(hours=(idx + 1) * 4)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            
+            db["tasks"][task_id]["message"] = f"Part {idx+1} ကို YouTube ပေါ်သို့ Schedule အဖြစ် အလိုအလျောက်တင်နေပါသည်..."
             up_url = upload_scheduled_short(clip_path, item.get("title", f"Part {idx+1}"), sched_time)
             if up_url:
                 uploaded_urls.append(up_url)
@@ -196,7 +225,12 @@ def process_pipeline(task_id: str, channel_id: str, direct_url: str):
             os.remove(raw_path)
 
         db["tasks"][task_id]["status"] = "completed"
-        db["tasks"][task_id]["message"] = "Clips ၃ ပုဒ် ဖြတ်ညှပ်ပြီးပါပြီ!"
+        
+        if uploaded_urls:
+            db["tasks"][task_id]["message"] = f"ဗီဒီယို {len(generated_clips)} ပုဒ်ကို ဖြတ်တောက်ပြီး YouTube ပေါ်သို့ ၄ နာရီခြားစီ Schedule (Auto-Post) တင်ပေးလိုက်ပါပြီ!"
+        else:
+            db["tasks"][task_id]["message"] = "ဗီဒီယို ၃ ပုဒ် ဖြတ်ညှပ်ပြီးပါပြီ! (Auto-Post skips: client_secret.json မတွေ့ရှိပါ)"
+            
         db["tasks"][task_id]["result_url"] = generated_clips[0]
         db["tasks"][task_id]["all_clips"] = generated_clips
         db["tasks"][task_id]["youtube_urls"] = uploaded_urls
@@ -293,7 +327,7 @@ def index_page():
 
                     <button type="submit" id="btnSubmit" 
                             class="w-full py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-semibold rounded-xl text-sm transition shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-2">
-                        <span>Auto-Clip (3 Shorts)</span>
+                        <span>Auto-Clip & Auto-Post</span>
                     </button>
                 </form>
             </div>
@@ -316,7 +350,7 @@ def index_page():
                 <div id="stateIdle" class="space-y-3">
                     <div class="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center mx-auto text-2xl">🎬</div>
                     <h3 class="text-lg font-semibold text-white">HTN Studio Ready</h3>
-                    <p class="text-sm text-slate-400 max-w-sm">Channel ID သို့မဟုတ် Link ထည့်သွင်းပြီး Shorts ၃ ပုဒ် ထုတ်ယူပါ</p>
+                    <p class="text-sm text-slate-400 max-w-sm">အလိုအလျောက် ဗီဒီယိုဖြတ်ပြီး YouTube ပေါ် auto task တင်ပေးမည့်စနစ်</p>
                 </div>
 
                 <div id="stateProcessing" class="hidden space-y-4">
@@ -328,11 +362,17 @@ def index_page():
                 </div>
 
                 <div id="stateCompleted" class="hidden flex flex-col items-center w-full">
-                    <h4 class="text-base font-bold text-emerald-400 mb-3">✨ Generated 3 Shorts (Auto-Scheduled)</h4>
+                    <h4 class="text-base font-bold text-emerald-400 mb-3">✨ Generated 3 Shorts (Scheduled for Auto-Post)</h4>
                     <div class="w-[260px] h-[460px] rounded-2xl overflow-hidden shadow-2xl border border-slate-700 mb-4 bg-black">
                         <video id="resultVideo" controls class="w-full h-full object-cover"></video>
                     </div>
                     <div id="clipsButtons" class="flex flex-wrap gap-2 justify-center mb-4"></div>
+                    
+                    <div class="flex flex-col gap-2 w-full max-w-xs mb-4">
+                        <div id="postStatusBox" class="text-xs bg-indigo-950/40 border border-indigo-500/20 px-4 py-2.5 rounded-xl text-indigo-300">
+                            <b>🚀 Auto-Post Status:</b> Loading tasks...
+                        </div>
+                    </div>
                     <a id="downloadLink" download="viral_short.mp4" 
                        class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-xs font-bold text-white shadow-lg transition">
                         Download Active Short (.mp4)
@@ -389,45 +429,4 @@ def index_page():
                 const btnBox = document.getElementById('clipsButtons');
                 btnBox.innerHTML = '';
                 if(data.all_clips && data.all_clips.length > 0) {
-                    data.all_clips.forEach((url, i) => {
-                        const b = document.createElement('button');
-                        b.innerText = `Part ${i+1}`;
-                        b.className = "px-3 py-1 bg-slate-800 hover:bg-indigo-600 rounded-lg text-xs font-semibold";
-                        b.onclick = () => {
-                            document.getElementById('resultVideo').src = url;
-                            document.getElementById('downloadLink').href = url;
-                        };
-                        btnBox.appendChild(b);
-                    });
-                }
-
-                setUIState('completed');
-            } else if(data.status === 'failed') {
-                clearInterval(pollTimer);
-                alert("လုပ်ဆောင်မှု မအောင်မြင်ပါ: " + data.message);
-                setUIState('idle');
-            }
-        }
-
-        function setUIState(state) {
-            document.getElementById('stateIdle').classList.toggle('hidden', state !== 'idle');
-            document.getElementById('stateProcessing').classList.toggle('hidden', state !== 'processing');
-            document.getElementById('stateCompleted').classList.toggle('hidden', state !== 'completed');
-            document.getElementById('btnSubmit').disabled = (state === 'processing');
-        }
-
-        async function addTrackChannel() {
-            const val = document.getElementById('new_channel').value.trim();
-            if(!val) return;
-            const fd = new FormData();
-            fd.append('channel_id', val);
-            const res = await fetch('/api/track', { method: 'POST', body: fd });
-            const data = await res.json();
-            renderChannels(data.channels);
-            document.getElementById('new_channel').value = '';
-        }
-
-        function renderChannels(channels) {
-            const box = document.getElementById('channelList');
-            if(channels.length === 0) return;
-            box.innerHTML = channels.map(c => `<div class="p-2 bg-slate-800/60 rounded-lg flex justify-between items-center"><span>${c}</span><span class="text-emerald-400">● live
+                    data.all_clips.forEa
