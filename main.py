@@ -37,7 +37,7 @@ db = {
 def upload_scheduled_short(video_path: str, title: str, schedule_time_iso: str):
     secret_path = os.path.join(BASE_DIR, "client_secret.json")
     if not os.path.exists(secret_path):
-        print("[YouTube Auto-Post] client_secret.json missing. Skipping auto-upload.")
+        print("[Auto-Post] client_secret.json ရှာမတွေ့ပါ။ upload ကို ကျော်ပါမည်။")
         return None
 
     try:
@@ -51,7 +51,7 @@ def upload_scheduled_short(video_path: str, title: str, schedule_time_iso: str):
                 secret_data = secret_data["web"]
                 
         if "refresh_token" not in secret_data:
-            print("[YouTube Auto-Post] Missing refresh_token in client_secret.json. Skipping auto-upload.")
+            print("[Auto-Post] client_secret.json ထဲတွင် refresh_token မပါရှိပါ။ upload ကို ကျော်ပါမည်။")
             return None
 
         creds = google.oauth2.credentials.Credentials(
@@ -67,7 +67,7 @@ def upload_scheduled_short(video_path: str, title: str, schedule_time_iso: str):
         body = {
             "snippet": {
                 "title": f"{title} #Shorts #HTN"[:100],
-                "description": f"{title} - Auto-posted via HTN Clip Studio! #Shorts #HTN",
+                "description": f"{title} - HTN Clip Studio မှ အလိုအလျောက်တင်ပေးထားသည်! #Shorts #HTN",
                 "tags": ["Shorts", "Viral", "HTN"],
                 "categoryId": "22"
             },
@@ -85,13 +85,13 @@ def upload_scheduled_short(video_path: str, title: str, schedule_time_iso: str):
         while response is None:
             status, response = req.next_chunk()
             if status:
-                print(f"[YouTube Auto-Post] Upload Progress: {int(status.progress() * 100)}%")
+                print(f"[Auto-Post Upload] {int(status.progress() * 100)}% ပြီးပါပြီ")
         
         video_id = response['id']
         return f"https://youtube.com/shorts/{video_id}"
         
     except Exception as e:
-        print(f"[YouTube Auto-Post Error] Could not upload auto post: {e}")
+        print(f"[Auto-Post Error] တင်၍မရပါ: {e}")
         return None
 
 # --- Core Video Processing ---
@@ -104,27 +104,21 @@ def fetch_latest_youtube_video(channel_id: str):
     return {"title": latest.title, "url": latest.link}
 
 def download_video(url: str, output_path: str):
+    # Cloud Data Center IP Block & Player Response Error ကို ကျော်လွှားသည့် extractor ဖွဲ့စည်းမှု
     ydl_opts = {
         'format': 'best[ext=mp4]/best',
         'outtmpl': output_path,
         'overwrites': True,
-        'quiet': False,
-        'no_warnings': False,
+        'quiet': True,
+        'no_warnings': True,
         'extractor_args': {
             'youtube': {
-                'player_client': ['android_creator', 'ios', 'web_embedded'],
-                'player_skip': ['webpage', 'configs']
+                'player_client': ['android_embedded', 'web_creator', 'android'],
+                'player_skip': ['webpage']
             }
         },
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Referer': 'https://www.youtube.com/',
-            'Origin': 'https://www.youtube.com'
-        },
         'nocheckcertificate': True,
-        'ignoreerrors': False,
+        'ignoreerrors': False
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
@@ -177,25 +171,25 @@ def process_pipeline(task_id: str, channel_id: str, direct_url: str):
 
         if direct_url:
             target_url = direct_url
-            video_title = "Direct Video Input"
+            video_title = "တိုက်ရိုက်ထည့်သွင်းထားသော ဗီဒီယို"
         else:
-            db["tasks"][task_id]["message"] = "Channel မှ ဗီဒီယိုအသစ် စစ်ဆေးနေပါသည်..."
+            db["tasks"][task_id]["message"] = "ချန်နယ်မှ ဗီဒီယိုအသစ်ကို ရှာဖွေနေပါသည်..."
             latest = fetch_latest_youtube_video(channel_id)
             if not latest:
-                raise Exception("Channel ID မမှန်ပါ သို့မဟုတ် ဗီဒီယိုမရှိပါ။")
+                raise Exception("Channel ID မှားယွင်းနေပါသည် သို့မဟုတ် ဗီဒီယိုမရှိပါ။")
             target_url = latest["url"]
             video_title = latest["title"]
 
         db["tasks"][task_id]["title"] = video_title
         raw_path = os.path.join(OUTPUT_DIR, f"{task_id}_raw.mp4")
 
-        db["tasks"][task_id]["message"] = "ဗီဒီယို ဒေါင်းလုဒ်ဆွဲနေပါသည်..."
+        db["tasks"][task_id]["message"] = "ဗီဒီယိုကို စနစ်ထဲသို့ ဒေါင်းလုဒ်ဆွဲနေပါသည်..."
         download_video(target_url, raw_path)
 
         db["tasks"][task_id]["message"] = "AI ဖြင့် စကားပြောသံများကို စာသားပြောင်းနေပါသည်..."
         transcript = transcribe_audio(raw_path)
 
-        db["tasks"][task_id]["message"] = "Viral အဖြစ်ဆုံးအပိုင်း ၃ ပုဒ်ကို ရှာဖွေနေပါသည်..."
+        db["tasks"][task_id]["message"] = "အကောင်းဆုံး Viral အပိုင်း ၃ ပုဒ်ကို ရှာဖွေနေပါသည်..."
         clips = find_3_viral_clips(transcript)
 
         base_time = datetime.now(timezone.utc)
@@ -207,13 +201,14 @@ def process_pipeline(task_id: str, channel_id: str, direct_url: str):
             clip_path = os.path.join(OUTPUT_DIR, clip_name)
             duration = item["end_time"] - item["start_time"]
             
-            db["tasks"][task_id]["message"] = f"Part {idx+1} ({item.get('title', 'Part ' + str(idx+1))}) ကို 9:16 Anti-Copyright Shorts အဖြစ် ဖြတ်ညှပ်နေပါသည်..."
+            db["tasks"][task_id]["message"] = f"အပိုင်း {idx+1} ကို 9:16 Anti-Copyright Shorts အဖြစ် ဖြတ်ညှပ်နေပါသည်..."
             render_anti_copyright_short(raw_path, item["start_time"], duration, clip_path)
             generated_clips.append(f"/outputs/{clip_name}")
 
+            # ၄ နာရီခြား တစ်ပုဒ်စီ Auto Schedule တင်ခြင်း (4h, 8h, 12h)
             sched_time = (base_time + timedelta(hours=(idx + 1) * 4)).strftime("%Y-%m-%dT%H:%M:%SZ")
             
-            db["tasks"][task_id]["message"] = f"Part {idx+1} ကို YouTube ပေါ်သို့ Schedule အဖြစ် အလိုအလျောက်တင်နေပါသည်..."
+            db["tasks"][task_id]["message"] = f"အပိုင်း {idx+1} ကို YouTube ပေါ်သို့ Schedule အဖြစ် အလိုအလျောက်တင်နေပါသည်..."
             up_url = upload_scheduled_short(clip_path, item.get("title", f"Part {idx+1}"), sched_time)
             if up_url:
                 uploaded_urls.append(up_url)
@@ -224,9 +219,9 @@ def process_pipeline(task_id: str, channel_id: str, direct_url: str):
         db["tasks"][task_id]["status"] = "completed"
         
         if uploaded_urls:
-            db["tasks"][task_id]["message"] = f"ဗီဒီယို {len(generated_clips)} ပုဒ်ကို ဖြတ်တောက်ပြီး YouTube ပေါ်သို့ ၄ နာရီခြားစီ Schedule (Auto-Post) တင်ပေးလိုက်ပါပြီ!"
+            db["tasks"][task_id]["message"] = f"ဗီဒီယို {len(generated_clips)} ပုဒ်ကို ဖြတ်တောက်ပြီး YouTube Shorts ပေါ်သို့ ၄ နာရီခြားစီ အလိုအလျောက် Schedule (Auto-Post) တင်ပေးလိုက်ပါပြီ!"
         else:
-            db["tasks"][task_id]["message"] = "ဗီဒီယို ၃ ပုဒ် ဖြတ်ညှပ်ပြီးပါပြီ! (Auto-Post skips: client_secret.json မတွေ့ရှိပါ)"
+            db["tasks"][task_id]["message"] = "ဗီဒီယို ၃ ပုဒ် ဖြတ်ညှပ်ပြီးပါပြီ! (Auto-Post ကို ကျော်သွားပါသည်)"
             
         db["tasks"][task_id]["result_url"] = generated_clips[0]
         db["tasks"][task_id]["all_clips"] = generated_clips
@@ -234,7 +229,7 @@ def process_pipeline(task_id: str, channel_id: str, direct_url: str):
 
     except Exception as e:
         db["tasks"][task_id]["status"] = "failed"
-        db["tasks"][task_id]["message"] = f"Error: {str(e)}"
+        db["tasks"][task_id]["message"] = f"အမှားဖြစ်ပေါ်ပါသည်: {str(e)}"
 
 # --- API Endpoints ---
 @app.post("/api/track")
