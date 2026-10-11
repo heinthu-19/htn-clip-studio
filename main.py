@@ -2,6 +2,7 @@ import os
 import json
 import uuid
 import subprocess
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, BackgroundTasks, Form
 from fastapi.responses import FileResponse, JSONResponse
@@ -104,24 +105,73 @@ def fetch_latest_youtube_video(channel_id: str):
     return {"title": latest.title, "url": latest.link}
 
 def download_video(url: str, output_path: str):
-    # Cloud Data Center IP Block & Player Response Error ကို ကျော်လွှားသည့် extractor ဖွဲ့စည်းမှု
-    ydl_opts = {
-        'format': 'best[ext=mp4]/best',
-        'outtmpl': output_path,
-        'overwrites': True,
-        'quiet': True,
-        'no_warnings': True,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android_embedded', 'web_creator', 'android'],
-                'player_skip': ['webpage']
+    # အဆင့် ၁ - yt-dlp ဖြင့် ကြိုးစားဒေါင်းလုဒ်ဆွဲခြင်း
+    try:
+        ydl_opts = {
+            'format': 'best[ext=mp4]/best',
+            'outtmpl': output_path,
+            'overwrites': True,
+            'quiet': True,
+            'no_warnings': True,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['mweb', 'android', 'ios'],
+                    'player_skip': ['webpage']
+                }
+            },
+            'nocheckcertificate': True
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 10000:
+            return
+    except Exception as e:
+        print(f"yt-dlp direct failed: {e}. Switching to stream fallback...")
+
+    # အဆင့် ၂ - Render IP Block ကို ကျော်လွှားရန် Cobalt API Fallback သုံးခြင်း
+    try:
+        video_id = url.split("v=")[-1].split("&")[0].split("/")[-1]
+        clean_url = f"https://www.youtube.com/watch?v={video_id}"
+        
+        req = urllib.request.Request(
+            "https://api.cobalt.tools/api/json",
+            data=json.dumps({"url": clean_url, "vQuality": "720"}).encode('utf-8'),
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0"
             }
-        },
-        'nocheckcertificate': True,
-        'ignoreerrors': False
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([url])
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            stream_url = data.get("url")
+            if stream_url:
+                urllib.request.urlretrieve(stream_url, output_path)
+                return
+    except Exception as fallback_err:
+        print(f"Fallback error: {fallback_err}. Trying secondary stream...")
+
+    # အဆင့် ၃ - Invidious API fallback
+    video_id = url.split("v=")[-1].split("&")[0].split("/")[-1]
+    invidious_instances = [
+        "https://inv.tux.pizza",
+        "https://vid.puffyan.us",
+        "https://invidious.nerdvpn.de"
+    ]
+    for instance in invidious_instances:
+        try:
+            api_url = f"{instance}/api/v1/videos/{video_id}"
+            req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                vdata = json.loads(resp.read().decode('utf-8'))
+                formats = vdata.get("formatStreams", [])
+                if formats:
+                    download_link = formats[-1]["url"]
+                    urllib.request.urlretrieve(download_link, output_path)
+                    return
+        except Exception:
+            continue
+    raise Exception("ဗီဒီယိုဒေါင်းလုဒ်ဆွဲမရပါ (YouTube Cloud Block ဖြစ်နေပါသည်)")
 
 def transcribe_audio(video_path: str):
     model = WhisperModel("base", device="cpu", compute_type="int8")
@@ -205,7 +255,6 @@ def process_pipeline(task_id: str, channel_id: str, direct_url: str):
             render_anti_copyright_short(raw_path, item["start_time"], duration, clip_path)
             generated_clips.append(f"/outputs/{clip_name}")
 
-            # ၄ နာရီခြား တစ်ပုဒ်စီ Auto Schedule တင်ခြင်း (4h, 8h, 12h)
             sched_time = (base_time + timedelta(hours=(idx + 1) * 4)).strftime("%Y-%m-%dT%H:%M:%SZ")
             
             db["tasks"][task_id]["message"] = f"အပိုင်း {idx+1} ကို YouTube ပေါ်သို့ Schedule အဖြစ် အလိုအလျောက်တင်နေပါသည်..."
