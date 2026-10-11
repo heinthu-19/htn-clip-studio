@@ -1,10 +1,8 @@
 fastapi
 uvicorn
-jinja2
 python-multipart
-yt-dlp>=2025.1.1
+edge-tts
 google-genai
-faster-whisper
-feedparser
 google-api-python-client
 google-auth-oauthlib
+pillow
