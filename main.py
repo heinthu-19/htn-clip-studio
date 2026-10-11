@@ -101,12 +101,21 @@ Return ONLY valid JSON format:
   "narration": "Full narration script for voiceover without speaker tags"
 }}
 """
-    res = ai_client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config={"response_mime_type": "application/json"}
-    )
-    return json.loads(res.text)
+    # Try gemini-3.8-flash first, fallback to standard models
+    models_to_try = ["gemini-3.8-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+    last_err = None
+    for model_name in models_to_try:
+        try:
+            res = ai_client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config={"response_mime_type": "application/json"}
+            )
+            return json.loads(res.text)
+        except Exception as e:
+            last_err = e
+            continue
+    raise Exception(f"Gemini API Error: {last_err}")
 
 # --- Voiceover Generation (Edge TTS) ---
 async def generate_voiceover(text: str, output_audio: str):
@@ -124,10 +133,7 @@ def get_audio_duration(audio_path: str) -> float:
 
 # --- 2.5D Parallax Cartoon Visual Renderer ---
 def render_25d_cartoon_video(image_path: str, audio_path: str, duration: float, output_video: str):
-    # Parallax 2.5D Effect: Smooth dynamic Ken-Burns zoom and pan (720x1280 9:16 Shorts)
     total_frames = int(duration * 30)
-    
-    # 2.5D Parallax Zoom-in with Depth blur background
     filter_complex = (
         f"[0:v]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,boxblur=25:5[bg];"
         f"[0:v]zoompan=z='min(zoom+0.0015,1.25)':d={total_frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=30[fg];"
