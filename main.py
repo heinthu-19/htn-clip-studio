@@ -4,7 +4,7 @@ import uuid
 import subprocess
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, BackgroundTasks, Form
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import feedparser
 import yt_dlp
@@ -45,7 +45,6 @@ def upload_scheduled_short(video_path: str, title: str, schedule_time_iso: str):
             secret_data = json.load(f)
 
         if "refresh_token" not in secret_data:
-            # support both direct and nested installed/oauth oauth schemas
             if "installed" in secret_data:
                 secret_data = secret_data["installed"]
             elif "web" in secret_data:
@@ -270,165 +269,6 @@ def get_task(task_id: str):
         return JSONResponse(status_code=404, content={"error": "Task not found"})
     return task
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/", response_class=FileResponse)
 def index_page():
-    # Standalone html standard formatting with accurate open/close triple-quotes
-    html_content = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HTN Clip Studio</title>
-    <link rel="manifest" href="/static/manifest.json">
-    <meta name="theme-color" content="#4F46E5">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght=400;600;700&display=swap" rel="stylesheet">
-    <style>body { font-family: 'Plus Jakarta Sans', sans-serif; }</style>
-</head>
-<body class="bg-[#0B0F19] text-slate-100 min-h-screen">
-    <nav class="border-b border-slate-800 bg-[#111827]/60 backdrop-blur-md sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-            <div class="flex items-center space-x-3">
-                <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/30">H</div>
-                <span class="font-bold text-lg tracking-tight">HTN Clip Studio</span>
-            </div>
-            <span class="text-xs bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-3 py-1 rounded-full font-medium">3x Multi-Clip & Auto-Schedule</span>
-        </div>
-    </nav>
-
-    <div class="max-w-6xl mx-auto px-6 py-10 grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div class="space-y-6">
-            <div class="bg-[#111827] border border-slate-800/80 rounded-2xl p-6 shadow-xl">
-                <h2 class="text-base font-bold text-white mb-4 flex items-center space-x-2">
-                    <span>⚡ Create 3 Viral Shorts</span>
-                </h2>
-                
-                <form id="clipForm" class="space-y-4">
-                    <div>
-                        <label class="block text-xs font-semibold uppercase text-slate-400 mb-1.5">Tracked Channel ID</label>
-                        <input type="text" id="channel_id" placeholder="UCX6OQ3DkcsbYNE6H8uQQuVA" 
-                               class="w-full bg-[#1A2234] border border-slate-700/80 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
-                    </div>
-
-                    <div class="relative flex items-center justify-center py-1">
-                        <div class="border-t border-slate-800 w-full"></div>
-                        <span class="bg-[#111827] px-3 text-[11px] font-bold text-slate-500 uppercase">OR</span>
-                    </div>
-
-                    <div>
-                        <label class="block text-xs font-semibold uppercase text-slate-400 mb-1.5">Direct Video Link</label>
-                        <input type="text" id="direct_url" placeholder="https://www.youtube.com/watch?v=..." 
-                               class="w-full bg-[#1A2234] border border-slate-700/80 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
-                    </div>
-
-                    <button type="submit" id="btnSubmit" 
-                            class="w-full py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-semibold rounded-xl text-sm transition shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-2">
-                        <span>Auto-Clip & Auto-Post</span>
-                    </button>
-                </form>
-            </div>
-
-            <div class="bg-[#111827] border border-slate-800/80 rounded-2xl p-6 shadow-xl">
-                <h2 class="text-base font-bold text-white mb-3">📡 Active Track Channels</h2>
-                <div class="flex space-x-2 mb-3">
-                    <input type="text" id="new_channel" placeholder="Channel ID..." 
-                           class="flex-1 bg-[#1A2234] border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-white">
-                    <button onclick="addTrackChannel()" class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-lg font-medium">Add</button>
-                </div>
-                <div id="channelList" class="space-y-1.5 text-xs text-slate-400 max-h-36 overflow-y-auto">
-                    <p class="text-slate-500">No channels tracked yet</p>
-                </div>
-            </div>
-        </div>
-
-        <div class="lg:col-span-2">
-            <div class="bg-[#111827] border border-slate-800/80 rounded-2xl p-6 shadow-xl min-h-[480px] flex flex-col justify-center items-center text-center relative overflow-hidden">
-                <div id="stateIdle" class="space-y-3">
-                    <div class="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center mx-auto text-2xl">🎬</div>
-                    <h3 class="text-lg font-semibold text-white">HTN Studio Ready</h3>
-                    <p class="text-sm text-slate-400 max-w-sm">အလိုအလျောက် ဗီဒီယိုဖြတ်ပြီး YouTube ပေါ် auto task တင်ပေးမည့်စနစ်</p>
-                </div>
-
-                <div id="stateProcessing" class="hidden space-y-4">
-                    <div class="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-                    <div>
-                        <h4 id="procTitle" class="text-base font-bold text-white">ဗီဒီယိုကို စစ်ဆေးနေပါသည်...</h4>
-                        <p id="procMsg" class="text-xs text-indigo-400 mt-1">Starting engine</p>
-                    </div>
-                </div>
-
-                <div id="stateCompleted" class="hidden flex flex-col items-center w-full">
-                    <h4 class="text-base font-bold text-emerald-400 mb-3">✨ Generated 3 Shorts (Scheduled for Auto-Post)</h4>
-                    <div class="w-[260px] h-[460px] rounded-2xl overflow-hidden shadow-2xl border border-slate-700 mb-4 bg-black">
-                        <video id="resultVideo" controls class="w-full h-full object-cover"></video>
-                    </div>
-                    <div id="clipsButtons" class="flex flex-wrap gap-2 justify-center mb-4"></div>
-                    
-                    <div class="flex flex-col gap-2 w-full max-w-xs mb-4">
-                        <div id="postStatusBox" class="text-xs bg-indigo-950/40 border border-indigo-500/20 px-4 py-2.5 rounded-xl text-indigo-300">
-                            <b>🚀 Auto-Post Status:</b> Loading tasks...
-                        </div>
-                    </div>
-                    <a id="downloadLink" download="viral_short.mp4" 
-                       class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-xs font-bold text-white shadow-lg transition">
-                        Download Active Short (.mp4)
-                    </a>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/static/sw.js');
-        }
-
-        let currentTaskId = null;
-        let pollTimer = null;
-
-        document.getElementById('clipForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const channelId = document.getElementById('channel_id').value;
-            const directUrl = document.getElementById('direct_url').value;
-
-            if(!channelId && !directUrl) {
-                alert("Channel ID သို့မဟုတ် Direct URL ထည့်သွင်းပေးပါ");
-                return;
-            }
-
-            const formData = new FormData();
-            formData.append('channel_id', channelId);
-            formData.append('direct_url', directUrl);
-
-            setUIState('processing');
-
-            const res = await fetch('/api/create-clip', { method: 'POST', body: formData });
-            const data = await res.json();
-            currentTaskId = data.task_id;
-
-            pollTimer = setInterval(pollTask, 3000);
-        });
-
-        async function pollTask() {
-            if(!currentTaskId) return;
-            const res = await fetch(`/api/task/${currentTaskId}`);
-            const data = await res.json();
-
-            document.getElementById('procMsg').innerText = data.message;
-            if(data.title) document.getElementById('procTitle').innerText = data.title;
-
-            if(data.status === 'completed') {
-                clearInterval(pollTimer);
-                document.getElementById('resultVideo').src = data.result_url;
-                document.getElementById('downloadLink').href = data.result_url;
-                
-                const btnBox = document.getElementById('clipsButtons');
-                btnBox.innerHTML = '';
-                if(data.all_clips && data.all_clips.length > 0) {
-                    data.all_clips.forEach((url, i) => {
-                        const b = document.createElement('button');
-                        b.innerText = `Part ${i+1}`;
-            
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
