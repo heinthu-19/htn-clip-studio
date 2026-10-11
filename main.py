@@ -3,6 +3,7 @@ import json
 import uuid
 import subprocess
 import urllib.request
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, BackgroundTasks, Form
 from fastapi.responses import FileResponse, JSONResponse
@@ -52,7 +53,7 @@ def upload_scheduled_short(video_path: str, title: str, schedule_time_iso: str):
                 secret_data = secret_data["web"]
                 
         if "refresh_token" not in secret_data:
-            print("[Auto-Post] client_secret.json ထဲတွင် refresh_token မပါရှိပါ။ upload ကို ကျော်ပါမည်။")
+            print("[Auto-Post] refresh_token မရှိပါ။ upload ကို ကျော်ပါမည်။")
             return None
 
         creds = google.oauth2.credentials.Credentials(
@@ -104,8 +105,20 @@ def fetch_latest_youtube_video(channel_id: str):
     latest = feed.entries[0]
     return {"title": latest.title, "url": latest.link}
 
+def extract_video_id(url: str):
+    if "youtu.be/" in url:
+        return url.split("youtu.be/")[1].split("?")[0]
+    if "watch?v=" in url:
+        return url.split("watch?v=")[1].split("&")[0]
+    if "shorts/" in url:
+        return url.split("shorts/")[1].split("?")[0]
+    return url.strip()
+
 def download_video(url: str, output_path: str):
-    # အဆင့် ၁ - yt-dlp ဖြင့် ကြိုးစားဒေါင်းလုဒ်ဆွဲခြင်း
+    v_id = extract_video_id(url)
+    clean_watch_url = f"https://www.youtube.com/watch?v={v_id}"
+
+    # Method 1: yt-dlp with Android Testsuite and Web Creator Bypass
     try:
         ydl_opts = {
             'format': 'best[ext=mp4]/best',
@@ -113,65 +126,85 @@ def download_video(url: str, output_path: str):
             'overwrites': True,
             'quiet': True,
             'no_warnings': True,
+            'socket_timeout': 30,
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['mweb', 'android', 'ios'],
-                    'player_skip': ['webpage']
+                    'player_client': ['android_testsuite', 'web_creator', 'android'],
+                    'player_skip': ['webpage', 'configs']
                 }
             },
             'nocheckcertificate': True
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 10000:
+            ydl.download([clean_watch_url])
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 50000:
             return
     except Exception as e:
-        print(f"yt-dlp direct failed: {e}. Switching to stream fallback...")
+        print(f"[Method 1 failed] {e}")
 
-    # အဆင့် ၂ - Render IP Block ကို ကျော်လွှားရန် Cobalt API Fallback သုံးခြင်း
-    try:
-        video_id = url.split("v=")[-1].split("&")[0].split("/")[-1]
-        clean_url = f"https://www.youtube.com/watch?v={video_id}"
-        
-        req = urllib.request.Request(
-            "https://api.cobalt.tools/api/json",
-            data=json.dumps({"url": clean_url, "vQuality": "720"}).encode('utf-8'),
-            headers={
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0"
-            }
-        )
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode('utf-8'))
-            stream_url = data.get("url")
-            if stream_url:
-                urllib.request.urlretrieve(stream_url, output_path)
-                return
-    except Exception as fallback_err:
-        print(f"Fallback error: {fallback_err}. Trying secondary stream...")
+    # Method 2: Piped API High-Speed Cloud Stream Extraction
+    piped_instances = [
+        "https://pipedapi.kavin.rocks",
+        "https://api.piped.privacy.com.de",
+        "https://piped-api.lunar.icu"
+    ]
+    for p_host in piped_instances:
+        try:
+            req_url = f"{p_host}/streams/{v_id}"
+            req = urllib.request.Request(req_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=12) as response:
+                p_data = json.loads(response.read().decode('utf-8'))
+                video_streams = p_data.get('videoStreams', [])
+                valid_stream = None
+                for st in video_streams:
+                    if st.get('format') == 'mp4' or 'video/mp4' in st.get('mimeType', ''):
+                        valid_stream = st.get('url')
+                        break
+                if not valid_stream and video_streams:
+                    valid_stream = video_streams[0].get('url')
+                
+                if valid_stream:
+                    urllib.request.urlretrieve(valid_stream, output_path)
+                    if os.path.exists(output_path) and os.path.getsize(output_path) > 50000:
+                        return
+        except Exception:
+            continue
 
-    # အဆင့် ၃ - Invidious API fallback
-    video_id = url.split("v=")[-1].split("&")[0].split("/")[-1]
-    invidious_instances = [
+    # Method 3: Invidious Public API Mirror Direct Pull
+    invid_instances = [
         "https://inv.tux.pizza",
         "https://vid.puffyan.us",
         "https://invidious.nerdvpn.de"
     ]
-    for instance in invidious_instances:
+    for inv_host in invid_instances:
         try:
-            api_url = f"{instance}/api/v1/videos/{video_id}"
-            req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                vdata = json.loads(resp.read().decode('utf-8'))
-                formats = vdata.get("formatStreams", [])
+            req_url = f"{inv_host}/api/v1/videos/{v_id}"
+            req = urllib.request.Request(req_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=12) as response:
+                inv_data = json.loads(response.read().decode('utf-8'))
+                formats = inv_data.get('formatStreams', [])
                 if formats:
-                    download_link = formats[-1]["url"]
-                    urllib.request.urlretrieve(download_link, output_path)
-                    return
+                    download_url = formats[-1].get('url')
+                    if download_url:
+                        urllib.request.urlretrieve(download_url, output_path)
+                        if os.path.exists(output_path) and os.path.getsize(output_path) > 50000:
+                            return
         except Exception:
             continue
-    raise Exception("ဗီဒီယိုဒေါင်းလုဒ်ဆွဲမရပါ (YouTube Cloud Block ဖြစ်နေပါသည်)")
+
+    # Method 4: FFmpeg Direct Stream Capturing
+    try:
+        cmd = [
+            "ffmpeg", "-y", "-headers", "User-Agent: Mozilla/5.0\r\n",
+            "-i", clean_watch_url, "-c", "copy", "-t", "300", output_path
+        ]
+        subprocess.run(cmd, check=True, timeout=60)
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 50000:
+            return
+    except Exception as e:
+        print(f"[Method 4 failed] {e}")
+
+    raise Exception("ဗီဒီယိုကို download ဆွဲမရပါ။ YouTube မှ Datacenter IP အားလုံးကို Block ပြုလုပ်ထားပါသည်။")
 
 def transcribe_audio(video_path: str):
     model = WhisperModel("base", device="cpu", compute_type="int8")
