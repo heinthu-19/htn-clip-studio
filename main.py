@@ -80,17 +80,21 @@ def fetch_latest_youtube_video(channel_id: str):
 
 def download_video(url: str, output_path: str):
     ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'format': 'best[ext=mp4]/best',
         'outtmpl': output_path,
         'overwrites': True,
-        # YouTube Bot Block (Sign in to confirm you're not a bot) ကို ကျော်လွှားရန်
+        'quiet': False,
+        'no_warnings': False,
+        # YouTube Cloud Data Center Block ကို ကျော်လွှားရန် Client ပြင်ဆင်ချက်
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'ios']
+                'player_client': ['android_creator', 'web_embedded', 'ios'],
+                'player_skip': ['webpage', 'configs']
             }
         },
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9',
         }
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -188,7 +192,7 @@ def process_pipeline(task_id: str, channel_id: str, direct_url: str):
             os.remove(raw_path)
 
         db["tasks"][task_id]["status"] = "completed"
-        db["tasks"][task_id]["message"] = "Clips ၃ ပုဒ် ဖြတ်ညှပ်ပြီး YouTube ပေါ် auto-schedule တင်ပေးပြီးပါပြီ!"
+        db["tasks"][task_id]["message"] = "Clips ၃ ပုဒ် ဖြတ်ညှပ်ပြီးပါပြီ!"
         db["tasks"][task_id]["result_url"] = generated_clips[0]
         db["tasks"][task_id]["all_clips"] = generated_clips
         db["tasks"][task_id]["youtube_urls"] = uploaded_urls
@@ -248,6 +252,187 @@ def index_page():
     <style>body { font-family: 'Plus Jakarta Sans', sans-serif; }</style>
 </head>
 <body class="bg-[#0B0F19] text-slate-100 min-h-screen">
+    <nav class="border-b border-slate-800 bg-[#111827]/60 backdrop-blur-md sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/30">H</div>
+                <span class="font-bold text-lg tracking-tight">HTN Clip Studio</span>
+            </div>
+            <span class="text-xs bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-3 py-1 rounded-full font-medium">3x Multi-Clip & Auto-Schedule</span>
+        </div>
+    </nav>
+
+    <div class="max-w-6xl mx-auto px-6 py-10 grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div class="space-y-6">
+            <div class="bg-[#111827] border border-slate-800/80 rounded-2xl p-6 shadow-xl">
+                <h2 class="text-base font-bold text-white mb-4 flex items-center space-x-2">
+                    <span>⚡ Create 3 Viral Shorts</span>
+                </h2>
+                
+                <form id="clipForm" class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-semibold uppercase text-slate-400 mb-1.5">Tracked Channel ID</label>
+                        <input type="text" id="channel_id" placeholder="UCX6OQ3DkcsbYNE6H8uQQuVA" 
+                               class="w-full bg-[#1A2234] border border-slate-700/80 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+                    </div>
+
+                    <div class="relative flex items-center justify-center py-1">
+                        <div class="border-t border-slate-800 w-full"></div>
+                        <span class="bg-[#111827] px-3 text-[11px] font-bold text-slate-500 uppercase">OR</span>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold uppercase text-slate-400 mb-1.5">Direct Video Link</label>
+                        <input type="text" id="direct_url" placeholder="https://www.youtube.com/watch?v=..." 
+                               class="w-full bg-[#1A2234] border border-slate-700/80 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+                    </div>
+
+                    <button type="submit" id="btnSubmit" 
+                            class="w-full py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-semibold rounded-xl text-sm transition shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-2">
+                        <span>Auto-Clip (3 Shorts)</span>
+                    </button>
+                </form>
+            </div>
+
+            <div class="bg-[#111827] border border-slate-800/80 rounded-2xl p-6 shadow-xl">
+                <h2 class="text-base font-bold text-white mb-3">📡 Active Track Channels</h2>
+                <div class="flex space-x-2 mb-3">
+                    <input type="text" id="new_channel" placeholder="Channel ID..." 
+                           class="flex-1 bg-[#1A2234] border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-white">
+                    <button onclick="addTrackChannel()" class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-lg font-medium">Add</button>
+                </div>
+                <div id="channelList" class="space-y-1.5 text-xs text-slate-400 max-h-36 overflow-y-auto">
+                    <p class="text-slate-500">No channels tracked yet</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="lg:col-span-2">
+            <div class="bg-[#111827] border border-slate-800/80 rounded-2xl p-6 shadow-xl min-h-[480px] flex flex-col justify-center items-center text-center relative overflow-hidden">
+                <div id="stateIdle" class="space-y-3">
+                    <div class="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center mx-auto text-2xl">🎬</div>
+                    <h3 class="text-lg font-semibold text-white">HTN Studio Ready</h3>
+                    <p class="text-sm text-slate-400 max-w-sm">Channel ID သို့မဟုတ် Link ထည့်သွင်းပြီး Shorts ၃ ပုဒ် ထုတ်ယူပါ</p>
+                </div>
+
+                <div id="stateProcessing" class="hidden space-y-4">
+                    <div class="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                    <div>
+                        <h4 id="procTitle" class="text-base font-bold text-white">ဗီဒီယိုကို စစ်ဆေးနေပါသည်...</h4>
+                        <p id="procMsg" class="text-xs text-indigo-400 mt-1">Starting engine</p>
+                    </div>
+                </div>
+
+                <div id="stateCompleted" class="hidden flex flex-col items-center w-full">
+                    <h4 class="text-base font-bold text-emerald-400 mb-3">✨ Generated 3 Shorts (Auto-Scheduled)</h4>
+                    <div class="w-[260px] h-[460px] rounded-2xl overflow-hidden shadow-2xl border border-slate-700 mb-4 bg-black">
+                        <video id="resultVideo" controls class="w-full h-full object-cover"></video>
+                    </div>
+                    <div id="clipsButtons" class="flex flex-wrap gap-2 justify-center mb-4"></div>
+                    <a id="downloadLink" download="viral_short.mp4" 
+                       class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-xs font-bold text-white shadow-lg transition">
+                        Download Active Short (.mp4)
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/static/sw.js');
+        }
+
+        let currentTaskId = null;
+        let pollTimer = null;
+
+        document.getElementById('clipForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const channelId = document.getElementById('channel_id').value;
+            const directUrl = document.getElementById('direct_url').value;
+
+            if(!channelId && !directUrl) {
+                alert("Channel ID သို့မဟုတ် Direct URL ထည့်သွင်းပေးပါ");
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('channel_id', channelId);
+            formData.append('direct_url', directUrl);
+
+            setUIState('processing');
+
+            const res = await fetch('/api/create-clip', { method: 'POST', body: formData });
+            const data = await res.json();
+            currentTaskId = data.task_id;
+
+            pollTimer = setInterval(pollTask, 3000);
+        });
+
+        async function pollTask() {
+            if(!currentTaskId) return;
+            const res = await fetch(`/api/task/${currentTaskId}`);
+            const data = await res.json();
+
+            document.getElementById('procMsg').innerText = data.message;
+            if(data.title) document.getElementById('procTitle').innerText = data.title;
+
+            if(data.status === 'completed') {
+                clearInterval(pollTimer);
+                document.getElementById('resultVideo').src = data.result_url;
+                document.getElementById('downloadLink').href = data.result_url;
+                
+                const btnBox = document.getElementById('clipsButtons');
+                btnBox.innerHTML = '';
+                if(data.all_clips && data.all_clips.length > 0) {
+                    data.all_clips.forEach((url, i) => {
+                        const b = document.createElement('button');
+                        b.innerText = `Part ${i+1}`;
+                        b.className = "px-3 py-1 bg-slate-800 hover:bg-indigo-600 rounded-lg text-xs font-semibold";
+                        b.onclick = () => {
+                            document.getElementById('resultVideo').src = url;
+                            document.getElementById('downloadLink').href = url;
+                        };
+                        btnBox.appendChild(b);
+                    });
+                }
+
+                setUIState('completed');
+            } else if(data.status === 'failed') {
+                clearInterval(pollTimer);
+                alert("လုပ်ဆောင်မှု မအောင်မြင်ပါ: " + data.message);
+                setUIState('idle');
+            }
+        }
+
+        function setUIState(state) {
+            document.getElementById('stateIdle').classList.toggle('hidden', state !== 'idle');
+            document.getElementById('stateProcessing').classList.toggle('hidden', state !== 'processing');
+            document.getElementById('stateCompleted').classList.toggle('hidden', state !== 'completed');
+            document.getElementById('btnSubmit').disabled = (state === 'processing');
+        }
+
+        async function addTrackChannel() {
+            const val = document.getElementById('new_channel').value.trim();
+            if(!val) return;
+            const fd = new FormData();
+            fd.append('channel_id', val);
+            const res = await fetch('/api/track', { method: 'POST', body: fd });
+            const data = await res.json();
+            renderChannels(data.channels);
+            document.getElementById('new_channel').value = '';
+        }
+
+        function renderChannels(channels) {
+            const box = document.getElementById('channelList');
+            if(channels.length === 0) return;
+            box.innerHTML = channels.map(c => `<div class="p-2 bg-slate-800/60 rounded-lg flex justify-between items-center"><span>${c}</span><span class="text-emerald-400">● live</span></div>`).join('');
+        }
+    </script>
+</body>
+</html>
+    """
+">
     <nav class="border-b border-slate-800 bg-[#111827]/60 backdrop-blur-md sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
             <div class="flex items-center space-x-3">
