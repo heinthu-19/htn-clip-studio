@@ -113,20 +113,19 @@ def download_video(url: str, output_path: str):
         # iOS-Native and Creator fallback extractor variables to bypass YouTube data center blocks
         'extractor_args': {
             'youtube': {
-                'player_client': ['android_creator', 'ios'],
+                'player_client': ['android_creator', 'ios', 'web_embedded'],
                 'player_skip': ['webpage', 'configs']
             }
         },
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
-            'Accept': '*/*',
-            'Accept-Language': 'en-US,en;q=0.9',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
             'Referer': 'https://www.youtube.com/',
             'Origin': 'https://www.youtube.com'
         },
         'nocheckcertificate': True,
         'ignoreerrors': False,
-        'logtostderr': False
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
@@ -429,4 +428,4 @@ def index_page():
                 const btnBox = document.getElementById('clipsButtons');
                 btnBox.innerHTML = '';
                 if(data.all_clips && data.all_clips.length > 0) {
-                    data.all_clips.forEa
+                 
