@@ -1,1 +1,9 @@
+fastapi
+uvicorn
+jinja2
+python-multipart
+yt-dlp
+google-genai
+faster-whisper
+feedparser
 
