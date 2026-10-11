@@ -1,0 +1,15 @@
+{
+  "name": "HTN Clip Studio",
+  "short_name": "HTN",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0B0F19",
+  "theme_color": "#4F46E5",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3074/3074767.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
