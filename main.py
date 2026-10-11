@@ -80,27 +80,23 @@ def fetch_latest_youtube_video(channel_id: str):
 
 def download_video(url: str, output_path: str):
     ydl_opts = {
-        'format': 'best[ext=mp4]/best',
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': output_path,
         'overwrites': True,
         'quiet': False,
         'no_warnings': False,
+        # YouTube Cloud Data Center Block ကို iOS Client ဖြင့် ကျော်လွှားခြင်း
         'extractor_args': {
             'youtube': {
-                'player_client': ['android_creator', 'web_embedded', 'ios'],
-                'player_skip': ['webpage', 'configs'],
-                'skip': ['dash', 'hls']
+                'player_client': ['ios']
             }
         },
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Sec-Fetch-Mode': 'navigate'
+            'User-Agent': 'com.google.ios.youtube/19.29.1 (iPhone14,3; U; CPU iOS 17_5_1 like Mac OS X; en_US)',
+            'X-YouTube-Client-Name': '5',
+            'X-YouTube-Client-Version': '19.29.1'
         },
-        'nocheckcertificate': True,
-        'ignoreerrors': False,
-        'logtostderr': False
+        'nocheckcertificate': True
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
@@ -187,7 +183,6 @@ def process_pipeline(task_id: str, channel_id: str, direct_url: str):
             render_anti_copyright_short(raw_path, item["start_time"], duration, clip_path)
             generated_clips.append(f"/outputs/{clip_name}")
 
-            # ၄ နာရီခြားပြီး schedule upload တင်ခြင်း (4h, 8h, 12h)
             sched_time = (base_time + timedelta(hours=(idx + 1) * 4)).strftime("%Y-%m-%dT%H:%M:%SZ")
             up_url = upload_scheduled_short(clip_path, item.get("title", f"Part {idx+1}"), sched_time)
             if up_url:
